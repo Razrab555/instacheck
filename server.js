@@ -52,19 +52,36 @@ app.get('/api/analyze', generalLimiter, async (req, res) => {
   if (cached) return res.json({ data: cached, cached: true, ts: Date.now() });
 
   try {
-    // ПРАВИЛЬНЫЙ ЭНДПОИНТ ИЗ ДОКУМЕНТАЦИИ SOCIALAPIS
-    const response = await axios.get(`https://api.socialapis.io/instagram/profile/details`, {
+    // 1. Запрашиваем шапку профиля
+    const profileRes = await axios.get(`https://api.socialapis.io/instagram/profile/details`, {
       params: { username: username },
       headers: { 'x-api-token': process.env.SOCIALAPIS_TOKEN },
       timeout: 10000
     });
+    const profileData = profileRes.data?.data || profileRes.data;
 
-    const data = response.data?.data || response.data;
+    // 2. Запрашиваем посты профиля
+    let posts = [];
+    try {
+      const postsRes = await axios.get(`https://api.socialapis.io/instagram/profile/posts`, {
+        params: { username: username },
+        headers: { 'x-api-token': process.env.SOCIALAPIS_TOKEN },
+        timeout: 10000
+      });
+      // Извлекаем массив постов (в разных API он может лежать в разных местах)
+      posts = postsRes.data?.data?.posts || postsRes.data?.posts || postsRes.data?.data || postsRes.data || [];
+    } catch (postErr) {
+      console.error('Failed to fetch posts:', postErr.message);
+    }
 
-    if (data.is_private === true) return res.status(403).json({ error: 'Приватный аккаунт' });
+    // 3. Склеиваем данные: добавляем посты в объект профиля
+    // Наш умный парсер на фронтенде ищет их в поле latest_posts
+    const finalData = { ...profileData, latest_posts: posts };
+
+    if (finalData.is_private === true) return res.status(403).json({ error: 'Приватный аккаунт' });
     
-    cache.set(`analyze:${username}`, data);
-    res.json({ data, cached: false, ts: Date.now() });
+    cache.set(`analyze:${username}`, finalData);
+    res.json({ data: finalData, cached: false, ts: Date.now() });
     
   } catch (error) {
     console.error('SOCIALAPIS ERROR:', error.response?.data || error.message);
