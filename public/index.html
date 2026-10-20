@@ -320,33 +320,54 @@
       document.getElementById('emptyState').style.display = 'none';
       document.getElementById('dataState').style.display = 'block';
 
-      const flw = user.edge_followed_by?.count ?? user.follower_count ?? 0;
-      const flwng = user.edge_follow?.count ?? user.following_count ?? 0;
-      const edges = user.edge_owner_to_timeline_media?.edges || user.latest_posts || [];
+      // УМНЫЙ ПАРСЕР: Поддерживает любые названия полей от разных API
+      const flw = user.edge_followed_by?.count ?? user.follower_count ?? user.followers ?? user.followers_count ?? user.followerCount ?? 0;
+      const flwng = user.edge_follow?.count ?? user.following_count ?? user.following ?? user.following_count ?? 0;
+      
+      const rawEdges = user.edge_owner_to_timeline_media?.edges || user.latest_posts || user.posts || user.timeline_media?.edges || [];
       const now = Date.now() / 1000;
-      const filteredEdges = edges.filter(e => { const p = e.node || e; const ts = p.taken_at_timestamp; if (!ts) return true; return (now - ts) <= (days * 86400); });
+      const filteredEdges = rawEdges.filter(e => { 
+        const p = e.node || e; 
+        const ts = p.taken_at_timestamp || p.taken_at || p.timestamp; 
+        if (!ts) return true; 
+        return (now - ts) <= (days * 86400); 
+      });
 
       const ers = []; const vPlays = [];
       const activityMap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ count: 0, likes: 0 })));
       
       const posts = filteredEdges.map(e => {
-        const p = e.node || e; const lks = p.edge_liked_by?.count ?? p.like_count ?? 0; const coms = p.edge_media_to_comment?.count ?? p.comment_count ?? 0;
+        const p = e.node || e; 
+        const lks = p.edge_liked_by?.count ?? p.like_count ?? p.likes ?? p.likes_count ?? p.likeCount ?? 0; 
+        const coms = p.edge_media_to_comment?.count ?? p.comment_count ?? p.comments ?? p.comments_count ?? p.commentCount ?? 0;
         const er = flw > 0 ? ((lks+coms)/flw)*100 : 0; ers.push(er);
-        const isVid = p.is_video || p.media_type === 2; const plays = p.video_view_count || (isVid ? lks * 10 : 0); if(isVid) vPlays.push(plays);
-        if (p.taken_at_timestamp) { const d = new Date(p.taken_at_timestamp * 1000); activityMap[d.getDay()][d.getHours()].count += 1; activityMap[d.getDay()][d.getHours()].likes += lks; }
-        return { id: p.id, isVid, likes: lks, comments: coms, plays, er, text: p.edge_media_to_caption?.edges?.[0]?.node?.text || p.caption?.text || '' };
+        
+        const isVid = p.is_video || p.media_type === 2 || p.type === 'video' || p.type === 'reel' || p.isVideo; 
+        const plays = p.video_view_count || p.play_count || p.views || (isVid ? lks * 10 : 0); 
+        if(isVid) vPlays.push(plays);
+        
+        const ts = p.taken_at_timestamp || p.taken_at || p.timestamp;
+        if (ts) { 
+          const d = new Date(ts * 1000); 
+          activityMap[d.getDay()][d.getHours()].count += 1; 
+          activityMap[d.getDay()][d.getHours()].likes += lks; 
+        }
+        
+        const text = p.edge_media_to_caption?.edges?.[0]?.node?.text || p.caption?.text || p.caption || p.text || '';
+        return { id: p.id || p.shortcode || Math.random(), isVid, likes: lks, comments: coms, plays, er, text };
       });
 
       const medER = getMedian(ers); const medViews = getMedian(vPlays);
       let aqs = 50; if (medER > 3) aqs += 20; else if (medER > 1) aqs += 10; if (flw > 0 && (flwng/flw) < 0.2) aqs += 30; aqs = Math.min(100, aqs);
-      State.currentData = { uname, flw, medER, aqs, posts, medViews, bio: user.biography || '' };
+      State.currentData = { uname, flw, medER, aqs, posts, medViews, bio: user.biography || user.bio || '' };
 
       document.getElementById('pUsername').textContent = uname;
-      document.getElementById('pName').textContent = user.full_name || uname;
+      document.getElementById('pName').textContent = user.full_name || user.fullName || user.name || uname;
       document.getElementById('pBio').textContent = State.currentData.bio;
-      document.getElementById('pVerified').style.display = user.is_verified ? 'inline' : 'none';
+      document.getElementById('pVerified').style.display = (user.is_verified || user.isVerified) ? 'inline' : 'none';
       
-      const av = document.getElementById('pAvatar'); const pic = user.profile_pic_url_hd || user.profile_pic_url;
+      const av = document.getElementById('pAvatar'); 
+      const pic = user.profile_pic_url_hd || user.profile_pic_url || user.avatar || user.profilePicUrl;
       av.onerror = () => { av.src = `https://ui-avatars.com/api/?name=${esc(uname)}&background=1c1c1e&color=fff`; };
       av.src = pic ? `https://images.weserv.nl/?url=${encodeURIComponent(pic)}` : '';
 
@@ -418,4 +439,4 @@
     }
   </script>
 </body>
-  </html>
+              </html>
