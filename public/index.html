@@ -320,18 +320,17 @@
       document.getElementById('emptyState').style.display = 'none';
       document.getElementById('dataState').style.display = 'block';
 
-      // УМНЫЙ ПАРСЕР: Поддерживает любые названия полей от разных API
       const flw = user.edge_followed_by?.count ?? user.follower_count ?? user.followers ?? user.followers_count ?? user.followerCount ?? 0;
       const flwng = user.edge_follow?.count ?? user.following_count ?? user.following ?? user.following_count ?? 0;
       
       const rawEdges = user.edge_owner_to_timeline_media?.edges || user.latest_posts || user.posts || user.timeline_media?.edges || [];
       const now = Date.now() / 1000;
-      const filteredEdges = rawEdges.filter(e => { 
+      const filteredEdges = Array.isArray(rawEdges) ? rawEdges.filter(e => { 
         const p = e.node || e; 
         const ts = p.taken_at_timestamp || p.taken_at || p.timestamp; 
         if (!ts) return true; 
         return (now - ts) <= (days * 86400); 
-      });
+      }) : [];
 
       const ers = []; const vPlays = [];
       const activityMap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ count: 0, likes: 0 })));
@@ -419,18 +418,46 @@
 
     async function generateAIReport() {
       if(!State.currentData) return showAlert('Сначала проанализируйте профиль.', 'error');
-      const btn = document.getElementById('aiBtn'); btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
-      const topPosts = [...State.currentData.posts].sort((a, b) => (b.likes + b.comments) - (a.likes + a.comments)).slice(0, 5);
+      
+      const btn = document.getElementById('aiBtn'); 
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner"></span> Генерация...'; 
+      btn.disabled = true;
+
       try {
+        // Защита от пустых постов (чтобы кнопка не ломалась)
+        const safePosts = Array.isArray(State.currentData.posts) ? State.currentData.posts : [];
+        const topPosts = [...safePosts].sort((a, b) => (b.likes + b.comments) - (a.likes + a.comments)).slice(0, 5);
+
         const res = await fetch('/api/ai', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: State.currentData.uname, metrics: { flw: State.currentData.flw, medER: State.currentData.medER, medViews: State.currentData.medViews || 0, bio: State.currentData.bio, posts: topPosts.map(p => ({ text: p.text, likes: p.likes, comments: p.comments, plays: p.plays })) } })
+          body: JSON.stringify({ 
+            username: State.currentData.uname, 
+            metrics: { 
+              flw: State.currentData.flw, 
+              medER: State.currentData.medER, 
+              medViews: State.currentData.medViews || 0, 
+              bio: State.currentData.bio, 
+              posts: topPosts.map(p => ({ text: p.text || '', likes: p.likes || 0, comments: p.comments || 0, plays: p.plays || 0 })) 
+            } 
+          })
         });
-        const json = await res.json(); if (!res.ok) throw new Error(json.error || 'AI недоступен');
+        
+        const json = await res.json(); 
+        if (!res.ok) throw new Error(json.error || 'AI недоступен');
+        
         State.currentData.reportMd = json.report;
         document.getElementById('aiOutput').innerHTML = renderMarkdown(json.report);
         document.getElementById('shareBtn').disabled = false; 
-      } catch(e) { document.getElementById('aiOutput').textContent = `Ошибка: ${e.message}`; showAlert(e.message, 'error'); } finally { btn.innerHTML = 'Сгенерировать'; btn.disabled = false; }
+        AudioEngine.play('success');
+      } catch(e) { 
+        console.error(e);
+        document.getElementById('aiOutput').innerHTML = `<div style="color: var(--danger); text-align: center; padding: 20px;">Ошибка: ${e.message}</div>`; 
+        showAlert(e.message, 'error'); 
+      } finally { 
+        btn.innerHTML = originalText; 
+        btn.disabled = false; 
+      }
     }
 
     function exportPDF() {
@@ -439,4 +466,4 @@
     }
   </script>
 </body>
-              </html>
+</html>
